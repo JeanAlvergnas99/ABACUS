@@ -74,8 +74,11 @@ class FMPClient:
         except Exception:
             return fallback
 
-    def analyst_estimates(self, ticker):
+    def analyst_estimates(self, ticker, period="annual"):
         return self._get(
             "analyst-estimates",
-            {"symbol": ticker.upper()},
+            {
+                "symbol": ticker.upper(),
+                "period": period,
+            },
         )
