@@ -23,8 +23,8 @@ class FMPClient:
             params=params,
             timeout=30,
         )
-        response.raise_for_status()
 
+        response.raise_for_status()
         data = response.json()
 
         if isinstance(data, dict) and data.get("Error Message"):
@@ -73,3 +73,9 @@ class FMPClient:
             return float(latest.get("year10")) / 100
         except Exception:
             return fallback
+
+    def analyst_estimates(self, ticker):
+        return self._get(
+            "analyst-estimates",
+            {"symbol": ticker.upper()},
+        )
