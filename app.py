@@ -3,6 +3,7 @@ import streamlit as st
 from fmp_client import FMPClient
 from valuation import (
     build_dcf_dataframe,
+    calculate_fcff_growth,
     calculate_terminal_growth,
     calculate_wacc,
     get_net_debt_and_shares,
@@ -26,7 +27,8 @@ with st.sidebar:
     use_auto_wacc = st.checkbox("Use automatic WACC", value=True)
     manual_wacc = st.slider("Manual WACC", 0.05, 0.20, 0.10, 0.01)
 
-    forecast_growth = st.slider("Annual FCFF Growth", -0.05, 0.15, 0.05, 0.01)
+    use_auto_fcff_growth = st.checkbox("Use automatic FCFF growth", value=True)
+    manual_forecast_growth = st.slider("Manual Annual FCFF Growth", -0.05, 0.15, 0.05, 0.01)
 
     use_auto_terminal_growth = st.checkbox("Use automatic terminal growth", value=True)
     manual_terminal_growth = st.slider("Manual Terminal Growth", 0.00, 0.05, 0.025, 0.005)
@@ -52,26 +54,22 @@ if run_button:
 
             dcf_table = build_dcf_dataframe(income, balance, cashflow)
 
-            net_debt, shares = get_net_debt_and_shares(
-                balance=balance,
-                profile=profile,
-                income=income,
-            )
+            net_debt, shares = get_net_debt_and_shares(balance, profile, income)
 
-            wacc_details = calculate_wacc(
-                income=income,
-                balance=balance,
-                profile=profile,
-            )
-
+            wacc_details = calculate_wacc(income, balance, profile)
             terminal_growth_details = calculate_terminal_growth(income)
+            fcff_growth_details = calculate_fcff_growth(dcf_table)
 
             selected_wacc = wacc_details["wacc"] if use_auto_wacc else manual_wacc
-
             selected_terminal_growth = (
                 terminal_growth_details["terminal_growth"]
                 if use_auto_terminal_growth
                 else manual_terminal_growth
+            )
+            selected_forecast_growth = (
+                fcff_growth_details["forecast_growth"]
+                if use_auto_fcff_growth
+                else manual_forecast_growth
             )
 
             results = run_dcf(
@@ -79,39 +77,23 @@ if run_button:
                 net_debt=net_debt,
                 shares_outstanding=shares,
                 wacc=selected_wacc,
-                forecast_growth=forecast_growth,
+                forecast_growth=selected_forecast_growth,
                 terminal_growth=selected_terminal_growth,
                 years=years,
             )
 
             st.success("Valuation completed successfully.")
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4 = st.columns(4)
 
-            col1.metric(
-                "Intrinsic Value / Share",
-                f"${results['intrinsic_price']:,.2f}",
-            )
+            col1.metric("Intrinsic Value / Share", f"${results['intrinsic_price']:,.2f}")
+            col2.metric("Enterprise Value", f"${results['enterprise_value'] / 1_000_000_000:,.2f}B")
+            col3.metric("Equity Value", f"${results['equity_value'] / 1_000_000_000:,.2f}B")
+            col4.metric("WACC Used", f"{selected_wacc:.2%}")
 
-            col2.metric(
-                "Enterprise Value",
-                f"${results['enterprise_value'] / 1_000_000_000:,.2f}B",
-            )
-
-            col3.metric(
-                "Equity Value",
-                f"${results['equity_value'] / 1_000_000_000:,.2f}B",
-            )
-
-            col4.metric(
-                "WACC Used",
-                f"{selected_wacc:.2%}",
-            )
-
-            col5.metric(
-                "Terminal Growth",
-                f"{selected_terminal_growth:.2%}",
-            )
+            col5, col6 = st.columns(2)
+            col5.metric("FCFF Growth Used", f"{selected_forecast_growth:.2%}")
+            col6.metric("Terminal Growth Used", f"{selected_terminal_growth:.2%}")
 
             st.subheader("Automatic WACC Details")
 
@@ -126,47 +108,29 @@ if run_button:
             wacc_col3.metric("Equity Weight", f"{wacc_details['equity_weight']:.2%}")
             wacc_col3.metric("Debt Weight", f"{wacc_details['debt_weight']:.2%}")
 
-            with st.expander("View WACC assumptions"):
+            st.subheader("Automatic Growth Details")
+
+            growth_col1, growth_col2, growth_col3 = st.columns(3)
+
+            growth_col1.metric("Historical FCFF CAGR", f"{fcff_growth_details['fcff_cagr']:.2%}")
+            growth_col2.metric("Forecast Growth Used", f"{selected_forecast_growth:.2%}")
+            growth_col3.metric("Revenue CAGR", f"{terminal_growth_details['revenue_cagr']:.2%}")
+
+            with st.expander("View assumptions"):
                 st.write(f"Risk-free rate: {wacc_details['risk_free_rate']:.2%}")
                 st.write(f"Equity risk premium: {wacc_details['equity_risk_premium']:.2%}")
                 st.write(f"Tax rate: {wacc_details['tax_rate']:.2%}")
                 st.write(f"Market cap: ${wacc_details['market_cap']:,.0f}")
                 st.write(f"Total debt: ${wacc_details['total_debt']:,.0f}")
-
-                if not use_auto_wacc:
-                    st.warning("Manual WACC override is active.")
-
-            st.subheader("Automatic Terminal Growth Details")
-
-            tg_col1, tg_col2 = st.columns(2)
-
-            tg_col1.metric(
-                "Revenue CAGR",
-                f"{terminal_growth_details['revenue_cagr']:.2%}",
-            )
-
-            tg_col2.metric(
-                "Terminal Growth Used",
-                f"{selected_terminal_growth:.2%}",
-            )
-
-            with st.expander("View terminal growth assumptions"):
-                st.write("Terminal growth is estimated as half of historical revenue CAGR.")
-                st.write("It is bounded between 2.00% and 4.00% to avoid unrealistic long-term assumptions.")
-
-                if not use_auto_terminal_growth:
-                    st.warning("Manual terminal growth override is active.")
+                st.write(f"Net debt: ${net_debt:,.0f}")
+                st.write(f"Shares outstanding: {shares:,.0f}")
+                st.write(f"Base FCFF: ${results['base_fcff']:,.0f}")
 
             st.subheader("DCF Historical Table")
             st.dataframe(dcf_table)
 
             st.subheader("Forecast")
             st.dataframe(results["forecast"])
-
-            st.subheader("Key Inputs Used")
-            st.write(f"Net debt: ${net_debt:,.0f}")
-            st.write(f"Shares outstanding: {shares:,.0f}")
-            st.write(f"Base FCFF: ${results['base_fcff']:,.0f}")
 
         except Exception as error:
             st.error(f"Could not run valuation: {error}")
