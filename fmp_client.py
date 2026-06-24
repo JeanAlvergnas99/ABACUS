@@ -7,73 +7,40 @@ load_dotenv()
 
 
 class FMPClient:
-    BASE_URL = "https://financialmodelingprep.com/stable"
+    """Small client for Financial Modeling Prep API."""
 
-    def __init__(self, api_key=None):
+    BASE_URL = "https://financialmodelingprep.com/api/v3"
+
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.getenv("FMP_API_KEY")
         if not self.api_key:
-            raise ValueError("Missing FMP API key.")
+            raise ValueError("Missing FMP API key. Add it in .env or Streamlit sidebar.")
 
-    def _get(self, endpoint, params=None):
+    def _get(self, endpoint: str, params: dict | None = None) -> list[dict]:
         params = params or {}
         params["apikey"] = self.api_key
-
-        response = requests.get(
-            f"{self.BASE_URL}/{endpoint}",
-            params=params,
-            timeout=30,
-        )
-
+        url = f"{self.BASE_URL}/{endpoint}"
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
-
         if isinstance(data, dict) and data.get("Error Message"):
             raise ValueError(data["Error Message"])
-
-        return data
-
-    def income_statement(self, ticker, limit=5):
-        data = self._get(
-            "income-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
-        )
-        return pd.DataFrame(data)
-
-    def balance_sheet(self, ticker, limit=5):
-        data = self._get(
-            "balance-sheet-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
-        )
-        return pd.DataFrame(data)
-
-    def cash_flow(self, ticker, limit=5):
-        data = self._get(
-            "cash-flow-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
-        )
-        return pd.DataFrame(data)
-
-    def profile(self, ticker):
-        data = self._get(
-            "profile",
-            {"symbol": ticker.upper()},
-        )
-        return data[0]
-
-    def treasury_rates(self):
-        data = self._get("treasury-rates")
-        return data
-
-    def risk_free_rate_10y(self, fallback=0.0425):
-        data = self.treasury_rates()
-
         if not data:
-            return fallback
+            raise ValueError(f"No data returned for endpoint: {endpoint}")
+        return data
 
-        latest = data[0]
-        rate = latest.get("year10")
+    def income_statement(self, ticker: str, limit: int = 5) -> pd.DataFrame:
+        data = self._get(f"income-statement/{ticker.upper()}", {"limit": limit})
+        return pd.DataFrame(data)
 
-        if rate is None:
-            return fallback
+    def balance_sheet(self, ticker: str, limit: int = 5) -> pd.DataFrame:
+        data = self._get(f"balance-sheet-statement/{ticker.upper()}", {"limit": limit})
+        return pd.DataFrame(data)
 
-        return float(rate) / 100
+    def cash_flow(self, ticker: str, limit: int = 5) -> pd.DataFrame:
+        data = self._get(f"cash-flow-statement/{ticker.upper()}", {"limit": limit})
+        return pd.DataFrame(data)
+
+    def profile(self, ticker: str) -> dict:
+        data = self._get(f"profile/{ticker.upper()}")
+        return data[0]
