@@ -1,23 +1,25 @@
-from valuation import safe_number, get_market_cap
+import pandas as pd
+
+
+def safe_number(value, default: float = 0.0) -> float:
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def get_market_cap(profile: dict) -> float:
+    return safe_number(profile.get("marketCap")) or safe_number(profile.get("mktCap"))
 
 
 def calculate_wacc(income, balance, profile, risk_free_rate=0.0425):
-    """Calculate WACC using CAPM, size premium, and synthetic credit spread.
-
-    Inputs:
-        income: pandas DataFrame from FMP income statement
-        balance: pandas DataFrame from FMP balance sheet
-        profile: dict from FMP company profile
-        risk_free_rate: decimal, e.g. 0.0425 for 4.25%
-
-    Returns:
-        dict with WACC and detailed assumptions.
-    """
     latest_income = income.copy()
     latest_balance = balance.copy()
 
-    latest_income["date"] = latest_income["date"].astype("datetime64[ns]")
-    latest_balance["date"] = latest_balance["date"].astype("datetime64[ns]")
+    latest_income["date"] = pd.to_datetime(latest_income["date"])
+    latest_balance["date"] = pd.to_datetime(latest_balance["date"])
 
     latest_income = latest_income.sort_values("date").iloc[-1]
     latest_balance = latest_balance.sort_values("date").iloc[-1]
@@ -67,6 +69,7 @@ def calculate_wacc(income, balance, profile, risk_free_rate=0.0425):
 
     pre_tax_cost_of_debt = risk_free_rate + credit_spread
     pre_tax_cost_of_debt = max(0.02, min(0.15, pre_tax_cost_of_debt))
+
     after_tax_cost_of_debt = pre_tax_cost_of_debt * (1 - tax_rate)
 
     total_capital = market_cap + total_debt
