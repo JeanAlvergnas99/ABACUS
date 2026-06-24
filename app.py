@@ -3,6 +3,7 @@ import streamlit as st
 from fmp_client import FMPClient
 from valuation import (
     build_dcf_dataframe,
+    calculate_terminal_growth,
     calculate_wacc,
     get_net_debt_and_shares,
     run_dcf,
@@ -23,10 +24,13 @@ with st.sidebar:
     st.header("DCF Assumptions")
 
     use_auto_wacc = st.checkbox("Use automatic WACC", value=True)
-
     manual_wacc = st.slider("Manual WACC", 0.05, 0.20, 0.10, 0.01)
+
     forecast_growth = st.slider("Annual FCFF Growth", -0.05, 0.15, 0.05, 0.01)
-    terminal_growth = st.slider("Terminal Growth", 0.00, 0.05, 0.025, 0.005)
+
+    use_auto_terminal_growth = st.checkbox("Use automatic terminal growth", value=True)
+    manual_terminal_growth = st.slider("Manual Terminal Growth", 0.00, 0.05, 0.025, 0.005)
+
     years = st.slider("Forecast Years", 3, 10, 5, 1)
 
     run_button = st.button("Run valuation")
@@ -46,9 +50,6 @@ if run_button:
             cashflow = client.cash_flow(ticker, limit=5)
             profile = client.profile(ticker)
 
-            st.subheader("Raw Profile Data")
-            st.json(profile)
-            
             dcf_table = build_dcf_dataframe(income, balance, cashflow)
 
             net_debt, shares = get_net_debt_and_shares(
@@ -63,7 +64,15 @@ if run_button:
                 profile=profile,
             )
 
+            terminal_growth_details = calculate_terminal_growth(income)
+
             selected_wacc = wacc_details["wacc"] if use_auto_wacc else manual_wacc
+
+            selected_terminal_growth = (
+                terminal_growth_details["terminal_growth"]
+                if use_auto_terminal_growth
+                else manual_terminal_growth
+            )
 
             results = run_dcf(
                 historical_fcff=dcf_table["fcff"],
@@ -71,13 +80,13 @@ if run_button:
                 shares_outstanding=shares,
                 wacc=selected_wacc,
                 forecast_growth=forecast_growth,
-                terminal_growth=terminal_growth,
+                terminal_growth=selected_terminal_growth,
                 years=years,
             )
 
             st.success("Valuation completed successfully.")
 
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
 
             col1.metric(
                 "Intrinsic Value / Share",
@@ -97,6 +106,11 @@ if run_button:
             col4.metric(
                 "WACC Used",
                 f"{selected_wacc:.2%}",
+            )
+
+            col5.metric(
+                "Terminal Growth",
+                f"{selected_terminal_growth:.2%}",
             )
 
             st.subheader("Automatic WACC Details")
@@ -121,6 +135,27 @@ if run_button:
 
                 if not use_auto_wacc:
                     st.warning("Manual WACC override is active.")
+
+            st.subheader("Automatic Terminal Growth Details")
+
+            tg_col1, tg_col2 = st.columns(2)
+
+            tg_col1.metric(
+                "Revenue CAGR",
+                f"{terminal_growth_details['revenue_cagr']:.2%}",
+            )
+
+            tg_col2.metric(
+                "Terminal Growth Used",
+                f"{selected_terminal_growth:.2%}",
+            )
+
+            with st.expander("View terminal growth assumptions"):
+                st.write("Terminal growth is estimated as half of historical revenue CAGR.")
+                st.write("It is bounded between 2.00% and 4.00% to avoid unrealistic long-term assumptions.")
+
+                if not use_auto_terminal_growth:
+                    st.warning("Manual terminal growth override is active.")
 
             st.subheader("DCF Historical Table")
             st.dataframe(dcf_table)
