@@ -100,6 +100,9 @@ if run_button:
 
             st.success("Valuation completed successfully.")
 
+            if results.get("fcff_warning"):
+                st.warning(results["fcff_warning"])
+
             current_price = profile.get("price")
             intrinsic_value = results["intrinsic_price"]
 
