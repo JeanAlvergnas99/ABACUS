@@ -66,7 +66,7 @@ if run_button:
             )
 
             terminal_growth_details = calculate_terminal_growth(income)
-            fcff_growth_details = calculate_fcff_growth(dcf_table)
+            fcff_growth_details = calculate_fcff_growth(dcf_table, income)
 
             selected_wacc = wacc_details["wacc"] if use_auto_wacc else manual_wacc
             selected_terminal_growth = (
@@ -121,8 +121,8 @@ if run_button:
             growth_col1, growth_col2, growth_col3 = st.columns(3)
 
             growth_col1.metric("Historical FCFF CAGR", f"{fcff_growth_details['fcff_cagr']:.2%}")
-            growth_col2.metric("Forecast Growth Used", f"{selected_forecast_growth:.2%}")
-            growth_col3.metric("Revenue CAGR", f"{terminal_growth_details['revenue_cagr']:.2%}")
+            growth_col2.metric("Revenue CAGR", f"{fcff_growth_details['revenue_cagr']:.2%}")
+            growth_col3.metric("Forecast Growth Used", f"{selected_forecast_growth:.2%}")
 
             with st.expander("View assumptions"):
                 st.write(f"Risk-free rate / 10Y Treasury: {wacc_details['risk_free_rate']:.2%}")
