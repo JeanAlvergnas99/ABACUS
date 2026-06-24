@@ -21,7 +21,7 @@ st.subheader("Intrinsic value calculator using a DCF model")
 with st.sidebar:
     st.header("Inputs")
 
-    api_key = st.secrets.get("FMP_API_KEY", "")
+    api_key = st.text_input("FMP API Key", type="password")
     ticker = st.text_input("Ticker", value="AAPL").upper().strip()
 
     st.header("DCF Assumptions")
@@ -105,28 +105,63 @@ if run_button:
 
             current_price = profile.get("price")
             intrinsic_value = results["intrinsic_price"]
-
-            if current_price:
-                upside_downside = (intrinsic_value / current_price) - 1
-            else:
-                upside_downside = None
-
-            col1, col2, col3, col4, col5 = st.columns(5)
-
-            col1.metric("Intrinsic Value", f"${intrinsic_value:,.2f}")
-
-            if current_price:
-                col2.metric("Current Price", f"${current_price:,.2f}")
-            else:
-                col2.metric("Current Price", "N/A")
+            upside_downside = (intrinsic_value / current_price) - 1 if current_price else None
 
             if upside_downside is not None:
-                col3.metric("Upside / Downside", f"{upside_downside:.2%}")
-            else:
-                col3.metric("Upside / Downside", "N/A")
+                valuation_color = "#16a34a" if upside_downside > 0 else "#dc2626"
+                valuation_text = "UNDERVALUED" if upside_downside > 0 else "OVERVALUED"
 
-            col4.metric("WACC", f"{selected_wacc:.2%}")
-            col5.metric("FCFF Growth", f"{selected_forecast_growth:.2%}")
+                st.markdown(
+                    f"""
+                    <div style="
+                        padding:28px;
+                        border-radius:18px;
+                        background-color:{valuation_color};
+                        color:white;
+                        margin-top:20px;
+                        margin-bottom:28px;
+                    ">
+                        <h2 style="margin:0 0 18px 0; font-weight:800;">
+                            {valuation_text}
+                        </h2>
+
+                        <div style="
+                            display:flex;
+                            justify-content:space-between;
+                            gap:25px;
+                            text-align:center;
+                            flex-wrap:wrap;
+                        ">
+                            <div style="flex:1; min-width:220px;">
+                                <div style="font-size:20px; opacity:0.9;">Intrinsic Value</div>
+                                <div style="font-size:58px; font-weight:900; line-height:1.1;">
+                                    ${intrinsic_value:,.2f}
+                                </div>
+                            </div>
+
+                            <div style="flex:1; min-width:220px;">
+                                <div style="font-size:20px; opacity:0.9;">Current Price</div>
+                                <div style="font-size:58px; font-weight:900; line-height:1.1;">
+                                    ${current_price:,.2f}
+                                </div>
+                            </div>
+
+                            <div style="flex:1; min-width:220px;">
+                                <div style="font-size:20px; opacity:0.9;">Upside / Downside</div>
+                                <div style="font-size:58px; font-weight:900; line-height:1.1;">
+                                    {upside_downside:.1%}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("WACC", f"{selected_wacc:.2%}")
+            col2.metric("FCFF Growth", f"{selected_forecast_growth:.2%}")
+            col3.metric("Terminal Growth", f"{selected_terminal_growth:.2%}")
 
             st.divider()
 
@@ -136,14 +171,10 @@ if run_button:
 
             with overview_col1:
                 valuation_fig = go.Figure()
-
                 valuation_fig.add_trace(
                     go.Bar(
                         x=["Current Price", "Intrinsic Value"],
-                        y=[
-                            current_price if current_price else 0,
-                            intrinsic_value,
-                        ],
+                        y=[current_price if current_price else 0, intrinsic_value],
                         text=[
                             f"${current_price:,.2f}" if current_price else "N/A",
                             f"${intrinsic_value:,.2f}",
@@ -151,19 +182,16 @@ if run_button:
                         textposition="auto",
                     )
                 )
-
                 valuation_fig.update_layout(
                     title="Current Price vs Intrinsic Value",
                     yaxis_title="Price per Share",
                     showlegend=False,
                     height=420,
                 )
-
                 st.plotly_chart(valuation_fig, use_container_width=True)
 
             with overview_col2:
                 assumptions_fig = go.Figure()
-
                 assumptions_fig.add_trace(
                     go.Bar(
                         x=["WACC", "FCFF Growth", "Terminal Growth"],
@@ -180,14 +208,12 @@ if run_button:
                         textposition="auto",
                     )
                 )
-
                 assumptions_fig.update_layout(
                     title="Key DCF Assumptions",
                     yaxis_title="Rate (%)",
                     showlegend=False,
                     height=420,
                 )
-
                 st.plotly_chart(assumptions_fig, use_container_width=True)
 
             st.subheader("Business Fundamentals")
@@ -213,9 +239,7 @@ if run_button:
                 title="Revenue, EBIT, and FCFF",
                 labels={"Amount": "Amount ($B)", "year": "Year"},
             )
-
             fundamentals_fig.update_layout(height=450)
-
             st.plotly_chart(fundamentals_fig, use_container_width=True)
 
             st.subheader("DCF Forecast")
@@ -243,9 +267,7 @@ if run_button:
                     "Amount": "Amount ($B)",
                 },
             )
-
             forecast_fig.update_layout(height=450)
-
             st.plotly_chart(forecast_fig, use_container_width=True)
 
             st.subheader("Automatic WACC Details")
