@@ -32,9 +32,9 @@ try:
     client = FMPClient(api_key=api_key or None)
 
     with st.spinner("Fetching financial statements..."):
-        income = client.income_statement(ticker, limit=6)
-        balance = client.balance_sheet(ticker, limit=6)
-        cashflow = client.cash_flow(ticker, limit=6)
+        income = client.income_statement(ticker, limit=5)
+        balance = client.balance_sheet(ticker, limit=5)
+        cashflow = client.cash_flow(ticker, limit=5)
         profile = client.profile(ticker)
 
     dcf_df = build_dcf_dataframe(income, balance, cashflow)
