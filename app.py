@@ -11,6 +11,10 @@ from valuation import (
     get_net_debt_and_shares,
     run_dcf,
 )
+from analyst_model import (
+    build_analyst_forecast,
+    run_dcf_from_forecast,
+)
 
 
 st.set_page_config(page_title="Abacus", layout="wide")
@@ -23,10 +27,15 @@ with st.sidebar:
 
     api_key = st.secrets.get("FMP_API_KEY")
 
-    ticker = st.text_input(
-        "Ticker",
-        value="AAPL",
-    ).upper().strip()
+    ticker = st.text_input("Ticker", value="AAPL").upper().strip()
+
+    st.header("Valuation Method")
+
+    valuation_method = st.radio(
+        "Choose model",
+        ["Historical DCF", "Analyst DCF"],
+        index=1,
+    )
 
     st.header("DCF Assumptions")
 
@@ -67,11 +76,9 @@ if not run_button:
     st.info("Enter a ticker and click Run valuation.")
     st.stop()
 
-
 if not api_key:
     st.error("FMP API key not configured in Streamlit Secrets.")
     st.stop()
-
 
 if not ticker:
     st.error("Please enter a ticker.")
@@ -85,14 +92,6 @@ try:
     balance = client.balance_sheet(ticker, limit=5)
     cashflow = client.cash_flow(ticker, limit=5)
     profile = client.profile(ticker)
-
-    # Temporary debug block for analyst estimates
-    try:
-        analyst = client.analyst_estimates(ticker, period="annual")
-        st.subheader("Analyst Estimates Debug")
-        st.write(analyst)
-    except Exception as analyst_error:
-        st.warning(f"Could not fetch analyst estimates: {analyst_error}")
 
     risk_free_rate = client.risk_free_rate_10y()
 
@@ -123,17 +122,43 @@ try:
         else manual_forecast_growth
     )
 
-    results = run_dcf(
-        historical_fcff=dcf_table["fcff"],
-        net_debt=net_debt,
-        shares_outstanding=shares,
-        wacc=selected_wacc,
-        forecast_growth=selected_forecast_growth,
-        terminal_growth=selected_terminal_growth,
-        years=years,
-    )
+    analyst_forecast = None
+    analyst_assumptions = None
 
-    st.success("Valuation completed successfully.")
+    if valuation_method == "Historical DCF":
+        results = run_dcf(
+            historical_fcff=dcf_table["fcff"],
+            net_debt=net_debt,
+            shares_outstanding=shares,
+            wacc=selected_wacc,
+            forecast_growth=selected_forecast_growth,
+            terminal_growth=selected_terminal_growth,
+            years=years,
+        )
+
+    else:
+        analyst_estimates = client.analyst_estimates(
+            ticker,
+            period="annual",
+        )
+
+        analyst_forecast, analyst_assumptions = build_analyst_forecast(
+            analyst_estimates=analyst_estimates,
+            income=income,
+            balance=balance,
+            cashflow=cashflow,
+            years=years,
+        )
+
+        results = run_dcf_from_forecast(
+            forecast_df=analyst_forecast,
+            net_debt=net_debt,
+            shares_outstanding=shares,
+            wacc=selected_wacc,
+            terminal_growth=selected_terminal_growth,
+        )
+
+    st.success(f"Valuation completed successfully using {valuation_method}.")
 
     if results.get("fcff_warning"):
         st.warning(results["fcff_warning"])
@@ -150,30 +175,26 @@ try:
 
     value_col1, value_col2, value_col3 = st.columns(3)
 
-    value_col1.metric(
-        "Intrinsic Value",
-        f"${intrinsic_value:,.2f}",
-    )
+    value_col1.metric("Intrinsic Value", f"${intrinsic_value:,.2f}")
 
     if current_price:
-        value_col2.metric(
-            "Current Market Price",
-            f"${current_price:,.2f}",
-        )
+        value_col2.metric("Current Market Price", f"${current_price:,.2f}")
     else:
         value_col2.metric("Current Market Price", "N/A")
 
     if upside_downside is not None:
-        value_col3.metric(
-            "Upside / Downside",
-            f"{upside_downside:.1%}",
-        )
+        value_col3.metric("Upside / Downside", f"{upside_downside:.1%}")
     else:
         value_col3.metric("Upside / Downside", "N/A")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("WACC", f"{selected_wacc:.2%}")
-    col2.metric("FCFF Growth", f"{selected_forecast_growth:.2%}")
+
+    if valuation_method == "Historical DCF":
+        col2.metric("FCFF Growth", f"{selected_forecast_growth:.2%}")
+    else:
+        col2.metric("Forecast Source", "Analyst Estimates")
+
     col3.metric("Terminal Growth", f"{selected_terminal_growth:.2%}")
 
     st.divider()
@@ -205,19 +226,35 @@ try:
 
     with overview_col2:
         assumptions_fig = go.Figure()
+
+        if valuation_method == "Historical DCF":
+            assumption_labels = ["WACC", "FCFF Growth", "Terminal Growth"]
+            assumption_values = [
+                selected_wacc * 100,
+                selected_forecast_growth * 100,
+                selected_terminal_growth * 100,
+            ]
+            assumption_text = [
+                f"{selected_wacc:.2%}",
+                f"{selected_forecast_growth:.2%}",
+                f"{selected_terminal_growth:.2%}",
+            ]
+        else:
+            assumption_labels = ["WACC", "Terminal Growth"]
+            assumption_values = [
+                selected_wacc * 100,
+                selected_terminal_growth * 100,
+            ]
+            assumption_text = [
+                f"{selected_wacc:.2%}",
+                f"{selected_terminal_growth:.2%}",
+            ]
+
         assumptions_fig.add_trace(
             go.Bar(
-                x=["WACC", "FCFF Growth", "Terminal Growth"],
-                y=[
-                    selected_wacc * 100,
-                    selected_forecast_growth * 100,
-                    selected_terminal_growth * 100,
-                ],
-                text=[
-                    f"{selected_wacc:.2%}",
-                    f"{selected_forecast_growth:.2%}",
-                    f"{selected_terminal_growth:.2%}",
-                ],
+                x=assumption_labels,
+                y=assumption_values,
+                text=assumption_text,
                 textposition="auto",
             )
         )
@@ -228,6 +265,58 @@ try:
             height=420,
         )
         st.plotly_chart(assumptions_fig, use_container_width=True)
+
+    if valuation_method == "Analyst DCF" and analyst_forecast is not None:
+        st.subheader("Analyst Operating Forecast")
+
+        analyst_display = analyst_forecast.copy()
+
+        analyst_display["revenue_b"] = analyst_display["revenue"] / 1_000_000_000
+        analyst_display["ebit_b"] = analyst_display["ebit"] / 1_000_000_000
+        analyst_display["fcff_b"] = analyst_display["fcff"] / 1_000_000_000
+
+        analyst_chart_data = analyst_display[
+            ["year", "revenue_b", "ebit_b", "fcff_b"]
+        ].rename(
+            columns={
+                "revenue_b": "Revenue",
+                "ebit_b": "EBIT",
+                "fcff_b": "FCFF",
+            }
+        )
+
+        analyst_long = analyst_chart_data.melt(
+            id_vars="year",
+            value_vars=["Revenue", "EBIT", "FCFF"],
+            var_name="Metric",
+            value_name="Amount",
+        )
+
+        analyst_fig = px.line(
+            analyst_long,
+            x="year",
+            y="Amount",
+            color="Metric",
+            markers=True,
+            title="Analyst Revenue, EBIT, and FCFF Forecast",
+            labels={"Amount": "Amount ($B)", "year": "Year"},
+        )
+        analyst_fig.update_layout(height=450)
+        st.plotly_chart(analyst_fig, use_container_width=True)
+
+        st.dataframe(
+            analyst_display[
+                [
+                    "year",
+                    "revenue_b",
+                    "ebit_b",
+                    "ebit_margin",
+                    "fcff_b",
+                    "num_analysts_revenue",
+                    "num_analysts_eps",
+                ]
+            ]
+        )
 
     st.subheader("Business Fundamentals")
 
@@ -249,7 +338,7 @@ try:
         y="Amount",
         color="Metric",
         markers=True,
-        title="Revenue, EBIT, and FCFF",
+        title="Historical Revenue, EBIT, and FCFF",
         labels={"Amount": "Amount ($B)", "year": "Year"},
     )
     fundamentals_fig.update_layout(height=450)
@@ -320,6 +409,7 @@ try:
     )
 
     with st.expander("View assumptions"):
+        st.write(f"Valuation method: {valuation_method}")
         st.write(f"Risk-free rate / 10Y Treasury: {wacc_details['risk_free_rate']:.2%}")
         st.write(f"Equity risk premium: {wacc_details['equity_risk_premium']:.2%}")
         st.write(f"Size premium: {wacc_details['size_premium']:.2%}")
@@ -331,6 +421,10 @@ try:
         st.write(f"Net debt: ${net_debt:,.0f}")
         st.write(f"Shares outstanding: {shares:,.0f}")
         st.write(f"Base FCFF: ${results['base_fcff']:,.0f}")
+
+        if valuation_method == "Analyst DCF" and analyst_assumptions is not None:
+            st.write("Analyst model assumptions:")
+            st.write(analyst_assumptions)
 
     with st.expander("View source data used by Abacus"):
         tab1, tab2, tab3, tab4, tab5 = st.tabs(
