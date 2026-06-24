@@ -79,6 +79,121 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
     return dcf
 
 
+def get_net_debt_and_shares(
+    balance: pd.DataFrame,
+    profile: dict,
+    income: pd.DataFrame | None = None,
+) -> tuple[float, float]:
+    latest_bs = balance.copy()
+
+    if "date" not in latest_bs.columns:
+        raise ValueError("Balance sheet is missing the date column.")
+
+    latest_bs["date"] = pd.to_datetime(latest_bs["date"])
+    latest_bs = latest_bs.sort_values("date").iloc[-1]
+
+    total_debt = safe_number(latest_bs.get("totalDebt"))
+    cash = safe_number(latest_bs.get("cashAndCashEquivalents"))
+    net_debt = total_debt - cash
+
+    shares = 0.0
+
+    for key in ["sharesOutstanding", "weightedAverageShsOut", "weightedAverageShsOutDil"]:
+        shares = safe_number(profile.get(key))
+        if shares > 0:
+            return net_debt, shares
+
+    if income is not None and not income.empty:
+        latest_income = income.copy()
+        latest_income["date"] = pd.to_datetime(latest_income["date"])
+        latest_income = latest_income.sort_values("date").iloc[-1]
+
+        for key in ["weightedAverageShsOut", "weightedAverageShsOutDil"]:
+            shares = safe_number(latest_income.get(key))
+            if shares > 0:
+                return net_debt, shares
+
+    price = safe_number(profile.get("price"))
+    market_cap = safe_number(profile.get("mktCap"))
+
+    if market_cap > 0 and price > 0:
+        shares = market_cap / price
+
+    if shares <= 0:
+        raise ValueError("Shares outstanding could not be found from FMP profile or income statement data.")
+
+    return net_debt, shares
+
+
+def calculate_wacc(
+    income: pd.DataFrame,
+    balance: pd.DataFrame,
+    profile: dict,
+    risk_free_rate: float = 0.0425,
+    equity_risk_premium: float = 0.05,
+    default_beta: float = 1.0,
+) -> dict:
+    latest_income = income.copy()
+    latest_balance = balance.copy()
+
+    latest_income["date"] = pd.to_datetime(latest_income["date"])
+    latest_balance["date"] = pd.to_datetime(latest_balance["date"])
+
+    latest_income = latest_income.sort_values("date").iloc[-1]
+    latest_balance = latest_balance.sort_values("date").iloc[-1]
+
+    beta = safe_number(profile.get("beta"), default_beta)
+    if beta <= 0:
+        beta = default_beta
+
+    market_cap = safe_number(profile.get("mktCap"))
+    total_debt = safe_number(latest_balance.get("totalDebt"))
+
+    interest_expense = abs(safe_number(latest_income.get("interestExpense")))
+    income_before_tax = safe_number(latest_income.get("incomeBeforeTax"))
+    income_tax = safe_number(latest_income.get("incomeTaxExpense"))
+
+    tax_rate = income_tax / income_before_tax if income_before_tax > 0 else 0.21
+    tax_rate = max(0.0, min(0.35, tax_rate))
+
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+
+    if total_debt > 0 and interest_expense > 0:
+        pre_tax_cost_of_debt = interest_expense / total_debt
+    else:
+        pre_tax_cost_of_debt = risk_free_rate + 0.02
+
+    pre_tax_cost_of_debt = max(0.02, min(0.15, pre_tax_cost_of_debt))
+    after_tax_cost_of_debt = pre_tax_cost_of_debt * (1 - tax_rate)
+
+    total_capital = market_cap + total_debt
+
+    if total_capital > 0:
+        equity_weight = market_cap / total_capital
+        debt_weight = total_debt / total_capital
+    else:
+        equity_weight = 1.0
+        debt_weight = 0.0
+
+    wacc = (equity_weight * cost_of_equity) + (debt_weight * after_tax_cost_of_debt)
+    wacc = max(0.05, min(0.20, wacc))
+
+    return {
+        "wacc": wacc,
+        "beta": beta,
+        "risk_free_rate": risk_free_rate,
+        "equity_risk_premium": equity_risk_premium,
+        "cost_of_equity": cost_of_equity,
+        "pre_tax_cost_of_debt": pre_tax_cost_of_debt,
+        "after_tax_cost_of_debt": after_tax_cost_of_debt,
+        "tax_rate": tax_rate,
+        "market_cap": market_cap,
+        "total_debt": total_debt,
+        "equity_weight": equity_weight,
+        "debt_weight": debt_weight,
+    }
+
+
 def run_dcf(
     historical_fcff: pd.Series,
     net_debt: float,
@@ -140,52 +255,3 @@ def run_dcf(
         "equity_value": equity_value,
         "intrinsic_price": intrinsic_price,
     }
-
-
-def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict, income: pd.DataFrame | None = None) -> tuple[float, float]:
-    latest_bs = balance.copy()
-
-    if "date" not in latest_bs.columns:
-        raise ValueError("Balance sheet is missing the date column.")
-
-    latest_bs["date"] = pd.to_datetime(latest_bs["date"])
-    latest_bs = latest_bs.sort_values("date").iloc[-1]
-
-    total_debt = safe_number(latest_bs.get("totalDebt"))
-    cash = safe_number(latest_bs.get("cashAndCashEquivalents"))
-    net_debt = total_debt - cash
-
-    shares = 0.0
-
-    for key in [
-        "sharesOutstanding",
-        "weightedAverageShsOut",
-        "weightedAverageShsOutDil",
-    ]:
-        shares = safe_number(profile.get(key))
-        if shares > 0:
-            return net_debt, shares
-
-    if income is not None and not income.empty:
-        latest_income = income.copy()
-        latest_income["date"] = pd.to_datetime(latest_income["date"])
-        latest_income = latest_income.sort_values("date").iloc[-1]
-
-        for key in [
-            "weightedAverageShsOut",
-            "weightedAverageShsOutDil",
-        ]:
-            shares = safe_number(latest_income.get(key))
-            if shares > 0:
-                return net_debt, shares
-
-    price = safe_number(profile.get("price"))
-    market_cap = safe_number(profile.get("mktCap"))
-
-    if market_cap > 0 and price > 0:
-        shares = market_cap / price
-
-    if shares <= 0:
-        raise ValueError("Shares outstanding could not be found from FMP profile or income statement data.")
-
-    return net_debt, shares
