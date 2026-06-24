@@ -118,7 +118,7 @@ def get_net_debt_and_shares(balance, profile, income=None):
     return net_debt, shares
 
 
-def calculate_wacc(income, balance, profile):
+def calculate_wacc(income, balance, profile, risk_free_rate=0.0425):
     latest_income = income.copy()
     latest_balance = balance.copy()
 
@@ -128,31 +128,53 @@ def calculate_wacc(income, balance, profile):
     latest_income = latest_income.sort_values("date").iloc[-1]
     latest_balance = latest_balance.sort_values("date").iloc[-1]
 
-    risk_free_rate = 0.0425
-    equity_risk_premium = 0.05
+    market_cap = get_market_cap(profile)
+    total_debt = safe_number(latest_balance.get("totalDebt"))
 
     beta = safe_number(profile.get("beta"), 1.0)
     if beta <= 0:
         beta = 1.0
 
-    market_cap = get_market_cap(profile)
-    total_debt = safe_number(latest_balance.get("totalDebt"))
+    # Cleaner investment-focused WACC assumptions
+    equity_risk_premium = 0.045
+
+    size_premium = 0.0
+    if market_cap < 2_000_000_000:
+        size_premium = 0.03
+    elif market_cap < 10_000_000_000:
+        size_premium = 0.02
+    elif market_cap < 50_000_000_000:
+        size_premium = 0.01
 
     interest_expense = abs(safe_number(latest_income.get("interestExpense")))
+    ebit = safe_number(latest_income.get("operatingIncome"))
     income_before_tax = safe_number(latest_income.get("incomeBeforeTax"))
     income_tax = safe_number(latest_income.get("incomeTaxExpense"))
 
     tax_rate = income_tax / income_before_tax if income_before_tax > 0 else 0.21
     tax_rate = max(0.0, min(0.35, tax_rate))
 
-    cost_of_equity = risk_free_rate + beta * equity_risk_premium
+    cost_of_equity = risk_free_rate + beta * equity_risk_premium + size_premium
 
-    if total_debt > 0 and interest_expense > 0:
-        pre_tax_cost_of_debt = interest_expense / total_debt
+    if interest_expense > 0:
+        interest_coverage = ebit / interest_expense
     else:
-        pre_tax_cost_of_debt = risk_free_rate + 0.02
+        interest_coverage = 10.0
 
+    if interest_coverage >= 8:
+        credit_spread = 0.01
+    elif interest_coverage >= 5:
+        credit_spread = 0.02
+    elif interest_coverage >= 3:
+        credit_spread = 0.03
+    elif interest_coverage >= 1:
+        credit_spread = 0.05
+    else:
+        credit_spread = 0.08
+
+    pre_tax_cost_of_debt = risk_free_rate + credit_spread
     pre_tax_cost_of_debt = max(0.02, min(0.15, pre_tax_cost_of_debt))
+
     after_tax_cost_of_debt = pre_tax_cost_of_debt * (1 - tax_rate)
 
     total_capital = market_cap + total_debt
@@ -165,14 +187,17 @@ def calculate_wacc(income, balance, profile):
         debt_weight = 0.0
 
     wacc = equity_weight * cost_of_equity + debt_weight * after_tax_cost_of_debt
-    wacc = max(0.05, min(0.20, wacc))
+    wacc = max(0.055, min(0.18, wacc))
 
     return {
         "wacc": wacc,
         "beta": beta,
         "risk_free_rate": risk_free_rate,
         "equity_risk_premium": equity_risk_premium,
+        "size_premium": size_premium,
         "cost_of_equity": cost_of_equity,
+        "interest_coverage": interest_coverage,
+        "credit_spread": credit_spread,
         "pre_tax_cost_of_debt": pre_tax_cost_of_debt,
         "after_tax_cost_of_debt": after_tax_cost_of_debt,
         "tax_rate": tax_rate,
@@ -199,7 +224,7 @@ def calculate_terminal_growth(income, min_growth=0.02, max_growth=0.04):
         if first > 0 and last > 0:
             revenue_cagr = (last / first) ** (1 / periods) - 1
 
-    terminal_growth = revenue_cagr * 0.5
+    terminal_growth = revenue_cagr * 0.8
     terminal_growth = max(min_growth, min(max_growth, terminal_growth))
 
     return {
@@ -226,7 +251,7 @@ def calculate_fcff_growth(dcf_table):
     else:
         fcff_cagr = (end_fcff / start_fcff) ** (1 / periods) - 1
 
-    forecast_growth = max(0.00, min(0.15, fcff_cagr))
+    forecast_growth = max(0.00, min(0.10, fcff_cagr))
 
     return {
         "fcff_cagr": fcff_cagr,
