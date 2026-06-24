@@ -1,7 +1,12 @@
 import streamlit as st
 
 from fmp_client import FMPClient
-from valuation import build_dcf_dataframe, get_net_debt_and_shares, run_dcf
+from valuation import (
+    build_dcf_dataframe,
+    calculate_wacc,
+    get_net_debt_and_shares,
+    run_dcf,
+)
 
 
 st.set_page_config(page_title="Abacus", layout="wide")
@@ -17,7 +22,9 @@ with st.sidebar:
 
     st.header("DCF Assumptions")
 
-    wacc = st.slider("WACC", 0.05, 0.20, 0.10, 0.01)
+    use_auto_wacc = st.checkbox("Use automatic WACC", value=True)
+
+    manual_wacc = st.slider("Manual WACC", 0.05, 0.20, 0.10, 0.01)
     forecast_growth = st.slider("Annual FCFF Growth", -0.05, 0.15, 0.05, 0.01)
     terminal_growth = st.slider("Terminal Growth", 0.00, 0.05, 0.025, 0.005)
     years = st.slider("Forecast Years", 3, 10, 5, 1)
@@ -47,11 +54,19 @@ if run_button:
                 income=income,
             )
 
+            wacc_details = calculate_wacc(
+                income=income,
+                balance=balance,
+                profile=profile,
+            )
+
+            selected_wacc = wacc_details["wacc"] if use_auto_wacc else manual_wacc
+
             results = run_dcf(
                 historical_fcff=dcf_table["fcff"],
                 net_debt=net_debt,
                 shares_outstanding=shares,
-                wacc=wacc,
+                wacc=selected_wacc,
                 forecast_growth=forecast_growth,
                 terminal_growth=terminal_growth,
                 years=years,
@@ -59,7 +74,7 @@ if run_button:
 
             st.success("Valuation completed successfully.")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
 
             col1.metric(
                 "Intrinsic Value / Share",
@@ -75,6 +90,34 @@ if run_button:
                 "Equity Value",
                 f"${results['equity_value'] / 1_000_000_000:,.2f}B",
             )
+
+            col4.metric(
+                "WACC Used",
+                f"{selected_wacc:.2%}",
+            )
+
+            st.subheader("Automatic WACC Details")
+
+            wacc_col1, wacc_col2, wacc_col3 = st.columns(3)
+
+            wacc_col1.metric("Beta", f"{wacc_details['beta']:.2f}")
+            wacc_col1.metric("Cost of Equity", f"{wacc_details['cost_of_equity']:.2%}")
+
+            wacc_col2.metric("Pre-Tax Cost of Debt", f"{wacc_details['pre_tax_cost_of_debt']:.2%}")
+            wacc_col2.metric("After-Tax Cost of Debt", f"{wacc_details['after_tax_cost_of_debt']:.2%}")
+
+            wacc_col3.metric("Equity Weight", f"{wacc_details['equity_weight']:.2%}")
+            wacc_col3.metric("Debt Weight", f"{wacc_details['debt_weight']:.2%}")
+
+            with st.expander("View WACC assumptions"):
+                st.write(f"Risk-free rate: {wacc_details['risk_free_rate']:.2%}")
+                st.write(f"Equity risk premium: {wacc_details['equity_risk_premium']:.2%}")
+                st.write(f"Tax rate: {wacc_details['tax_rate']:.2%}")
+                st.write(f"Market cap: ${wacc_details['market_cap']:,.0f}")
+                st.write(f"Total debt: ${wacc_details['total_debt']:,.0f}")
+
+                if not use_auto_wacc:
+                    st.warning("Manual WACC override is active.")
 
             st.subheader("DCF Historical Table")
             st.dataframe(dcf_table)
