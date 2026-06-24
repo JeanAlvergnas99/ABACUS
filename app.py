@@ -46,6 +46,9 @@ if run_button:
             cashflow = client.cash_flow(ticker, limit=5)
             profile = client.profile(ticker)
 
+            st.subheader("Raw Profile Data")
+            st.json(profile)
+            
             dcf_table = build_dcf_dataframe(income, balance, cashflow)
 
             net_debt, shares = get_net_debt_and_shares(
