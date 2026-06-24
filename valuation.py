@@ -198,6 +198,46 @@ def calculate_wacc(
     }
 
 
+def calculate_terminal_growth(
+    income: pd.DataFrame,
+    min_growth: float = 0.02,
+    max_growth: float = 0.04,
+) -> dict:
+    income = income.copy()
+
+    if "date" not in income.columns:
+        raise ValueError("Income statement is missing the date column.")
+
+    if "revenue" not in income.columns:
+        raise ValueError("Income statement is missing the revenue column.")
+
+    income["date"] = pd.to_datetime(income["date"])
+    income = income.sort_values("date")
+
+    revenues = income["revenue"].dropna()
+
+    revenue_cagr = 0.025
+
+    if len(revenues) >= 2:
+        first_revenue = safe_number(revenues.iloc[0])
+        last_revenue = safe_number(revenues.iloc[-1])
+        periods = len(revenues) - 1
+
+        if first_revenue > 0 and last_revenue > 0 and periods > 0:
+            revenue_cagr = (last_revenue / first_revenue) ** (1 / periods) - 1
+
+    terminal_growth = revenue_cagr * 0.5
+    terminal_growth = max(min_growth, terminal_growth)
+    terminal_growth = min(max_growth, terminal_growth)
+
+    return {
+        "terminal_growth": terminal_growth,
+        "revenue_cagr": revenue_cagr,
+        "min_growth": min_growth,
+        "max_growth": max_growth,
+    }
+
+
 def run_dcf(
     historical_fcff: pd.Series,
     net_debt: float,
