@@ -21,7 +21,7 @@ st.subheader("Intrinsic value calculator using a DCF model")
 with st.sidebar:
     st.header("Inputs")
 
-    api_key = st.text_input("FMP API Key", type="password")
+    api_key = st.secrets.get("FMP_API_KEY", "")
     ticker = st.text_input("Ticker", value="AAPL").upper().strip()
 
     st.header("DCF Assumptions")
