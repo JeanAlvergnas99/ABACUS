@@ -21,7 +21,7 @@ class FMPClient:
         response = requests.get(
             f"{self.BASE_URL}/{endpoint}",
             params=params,
-            timeout=30
+            timeout=30,
         )
 
         response.raise_for_status()
@@ -35,28 +35,45 @@ class FMPClient:
     def income_statement(self, ticker, limit=5):
         data = self._get(
             "income-statement",
-            {"symbol": ticker.upper(), "limit": limit}
+            {"symbol": ticker.upper(), "limit": min(limit, 5)},
         )
         return pd.DataFrame(data)
 
     def balance_sheet(self, ticker, limit=5):
         data = self._get(
             "balance-sheet-statement",
-            {"symbol": ticker.upper(), "limit": limit}
+            {"symbol": ticker.upper(), "limit": min(limit, 5)},
         )
         return pd.DataFrame(data)
 
     def cash_flow(self, ticker, limit=5):
         data = self._get(
             "cash-flow-statement",
-            {"symbol": ticker.upper(), "limit": limit}
+            {"symbol": ticker.upper(), "limit": min(limit, 5)},
         )
         return pd.DataFrame(data)
 
     def profile(self, ticker):
         data = self._get(
             "profile",
-            {"symbol": ticker.upper()}
+            {"symbol": ticker.upper()},
         )
         return data[0]
-        return data[0]
+
+    def treasury_rates(self):
+        data = self._get("treasury-rates")
+        return data
+
+    def risk_free_rate_10y(self, fallback=0.0425):
+        data = self.treasury_rates()
+
+        if not data:
+            return fallback
+
+        latest = data[0]
+        rate = latest.get("year10")
+
+        if rate is None:
+            return fallback
+
+        return float(rate) / 100
