@@ -29,7 +29,7 @@ if not run_button:
     st.stop()
 
 try:
-    client = FMPClient(api_key=api_key or None)
+    client = FMPClient(api_key=st.secrets["FMP_API_KEY"])
 
     with st.spinner("Fetching financial statements..."):
         income = client.income_statement(ticker, limit=6)
