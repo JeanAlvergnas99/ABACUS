@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 
 
@@ -12,11 +11,6 @@ def safe_number(value, default: float = 0.0) -> float:
 
 
 def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: pd.DataFrame) -> pd.DataFrame:
-    """Builds a DCF-ready table from FMP statements.
-
-    FCFF approximation:
-    EBIT * (1 - tax rate) + D&A - CapEx - change in NWC
-    """
     income = income.copy()
     balance = balance.copy()
     cashflow = cashflow.copy()
@@ -31,11 +25,11 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
     previous_nwc = None
 
     for _, inc in income.iterrows():
-        date = inc["date"]
-        year = date.year
+        year = inc["date"].year
 
         bs_match = balance[balance["date"].dt.year == year]
         cf_match = cashflow[cashflow["date"].dt.year == year]
+
         if bs_match.empty or cf_match.empty:
             continue
 
@@ -59,6 +53,7 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
         cash = safe_number(bs.get("cashAndCashEquivalents"))
         current_liabilities = safe_number(bs.get("totalCurrentLiabilities"))
         short_term_debt = safe_number(bs.get("shortTermDebt"))
+
         nwc = (current_assets - cash) - (current_liabilities - short_term_debt)
 
         change_nwc = 0.0 if previous_nwc is None else nwc - previous_nwc
@@ -80,8 +75,10 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
         })
 
     dcf = pd.DataFrame(rows)
+
     if dcf.empty:
         raise ValueError("Could not build DCF table from available financial data.")
+
     return dcf
 
 
@@ -94,23 +91,32 @@ def run_dcf(
     terminal_growth: float = 0.025,
     years: int = 5,
 ) -> dict:
-    """Runs a simple DCF model and returns valuation outputs."""
     if shares_outstanding <= 0:
         raise ValueError("Shares outstanding must be greater than zero.")
+
     if wacc <= terminal_growth:
         raise ValueError("WACC must be greater than terminal growth.")
 
-    base_fcff = float(historical_fcff.dropna().iloc[-1])
+    clean_fcff = historical_fcff.dropna()
+
+    if clean_fcff.empty:
+        raise ValueError("FCFF is unavailable.")
+
+    base_fcff = float(clean_fcff.iloc[-1])
+
     if base_fcff <= 0:
-        base_fcff = float(historical_fcff.dropna().mean())
+        base_fcff = float(clean_fcff.mean())
+
     if base_fcff <= 0:
         raise ValueError("FCFF is negative or unavailable. This simple DCF needs positive FCFF.")
 
     forecast = []
+
     for year in range(1, years + 1):
         fcff = base_fcff * ((1 + forecast_growth) ** year)
         discount_factor = (1 + wacc) ** year
         present_value = fcff / discount_factor
+
         forecast.append({
             "forecast_year": year,
             "fcff": fcff,
@@ -119,6 +125,7 @@ def run_dcf(
         })
 
     forecast_df = pd.DataFrame(forecast)
+
     final_fcff = forecast_df.iloc[-1]["fcff"]
     terminal_value = final_fcff * (1 + terminal_growth) / (wacc - terminal_growth)
     pv_terminal_value = terminal_value / ((1 + wacc) ** years)
@@ -139,8 +146,11 @@ def run_dcf(
 
 
 def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict) -> tuple[float, float]:
-    """Extracts latest net debt and shares outstanding."""
     latest_bs = balance.copy()
+
+    if "date" not in latest_bs.columns:
+        raise ValueError("Balance sheet is missing the date column.")
+
     latest_bs["date"] = pd.to_datetime(latest_bs["date"])
     latest_bs = latest_bs.sort_values("date").iloc[-1]
 
@@ -148,8 +158,18 @@ def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict) -> tuple[float
     cash = safe_number(latest_bs.get("cashAndCashEquivalents"))
     net_debt = total_debt - cash
 
-    shares = safe_number(profile.get("mktCap")) / safe_number(profile.get("price"), 1.0)
+    price = safe_number(profile.get("price"))
+    market_cap = safe_number(profile.get("mktCap"))
+
+    shares = safe_number(profile.get("sharesOutstanding"))
+
     if shares <= 0:
-        shares = safe_number(profile.get("sharesOutstanding"))
+        shares = safe_number(profile.get("weightedAverageShsOut"))
+
+    if shares <= 0 and market_cap > 0 and price > 0:
+        shares = market_cap / price
+
+    if shares <= 0:
+        raise ValueError("Shares outstanding could not be found from FMP profile data.")
 
     return net_debt, shares
