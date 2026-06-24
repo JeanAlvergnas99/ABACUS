@@ -1,4 +1,6 @@
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
 
 from fmp_client import FMPClient
 from valuation import (
@@ -14,7 +16,7 @@ from valuation import (
 st.set_page_config(page_title="Abacus", layout="wide")
 
 st.title("Abacus")
-st.subheader("Simple intrinsic value calculator using a DCF model")
+st.subheader("Intrinsic value calculator using a DCF model")
 
 with st.sidebar:
     st.header("Inputs")
@@ -38,6 +40,13 @@ with st.sidebar:
     run_button = st.button("Run valuation")
 
 
+def to_billions(df, columns):
+    df = df.copy()
+    for col in columns:
+        df[col] = df[col] / 1_000_000_000
+    return df
+
+
 if run_button:
     if not api_key:
         st.error("Please enter your FMP API key.")
@@ -55,7 +64,6 @@ if run_button:
             risk_free_rate = client.risk_free_rate_10y()
 
             dcf_table = build_dcf_dataframe(income, balance, cashflow)
-
             net_debt, shares = get_net_debt_and_shares(balance, profile, income)
 
             wacc_details = calculate_wacc(
@@ -92,16 +100,150 @@ if run_button:
 
             st.success("Valuation completed successfully.")
 
-            col1, col2, col3, col4 = st.columns(4)
+            current_price = profile.get("price")
+            intrinsic_value = results["intrinsic_price"]
 
-            col1.metric("Intrinsic Value / Share", f"${results['intrinsic_price']:,.2f}")
-            col2.metric("Enterprise Value", f"${results['enterprise_value'] / 1_000_000_000:,.2f}B")
-            col3.metric("Equity Value", f"${results['equity_value'] / 1_000_000_000:,.2f}B")
-            col4.metric("WACC Used", f"{selected_wacc:.2%}")
+            if current_price:
+                upside_downside = (intrinsic_value / current_price) - 1
+            else:
+                upside_downside = None
 
-            col5, col6 = st.columns(2)
-            col5.metric("FCFF Growth Used", f"{selected_forecast_growth:.2%}")
-            col6.metric("Terminal Growth Used", f"{selected_terminal_growth:.2%}")
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            col1.metric("Intrinsic Value", f"${intrinsic_value:,.2f}")
+
+            if current_price:
+                col2.metric("Current Price", f"${current_price:,.2f}")
+            else:
+                col2.metric("Current Price", "N/A")
+
+            if upside_downside is not None:
+                col3.metric("Upside / Downside", f"{upside_downside:.2%}")
+            else:
+                col3.metric("Upside / Downside", "N/A")
+
+            col4.metric("WACC", f"{selected_wacc:.2%}")
+            col5.metric("FCFF Growth", f"{selected_forecast_growth:.2%}")
+
+            st.divider()
+
+            st.subheader("Valuation Overview")
+
+            overview_col1, overview_col2 = st.columns(2)
+
+            with overview_col1:
+                valuation_fig = go.Figure()
+
+                valuation_fig.add_trace(
+                    go.Bar(
+                        x=["Current Price", "Intrinsic Value"],
+                        y=[
+                            current_price if current_price else 0,
+                            intrinsic_value,
+                        ],
+                        text=[
+                            f"${current_price:,.2f}" if current_price else "N/A",
+                            f"${intrinsic_value:,.2f}",
+                        ],
+                        textposition="auto",
+                    )
+                )
+
+                valuation_fig.update_layout(
+                    title="Current Price vs Intrinsic Value",
+                    yaxis_title="Price per Share",
+                    showlegend=False,
+                    height=420,
+                )
+
+                st.plotly_chart(valuation_fig, use_container_width=True)
+
+            with overview_col2:
+                assumptions_fig = go.Figure()
+
+                assumptions_fig.add_trace(
+                    go.Bar(
+                        x=["WACC", "FCFF Growth", "Terminal Growth"],
+                        y=[
+                            selected_wacc * 100,
+                            selected_forecast_growth * 100,
+                            selected_terminal_growth * 100,
+                        ],
+                        text=[
+                            f"{selected_wacc:.2%}",
+                            f"{selected_forecast_growth:.2%}",
+                            f"{selected_terminal_growth:.2%}",
+                        ],
+                        textposition="auto",
+                    )
+                )
+
+                assumptions_fig.update_layout(
+                    title="Key DCF Assumptions",
+                    yaxis_title="Rate (%)",
+                    showlegend=False,
+                    height=420,
+                )
+
+                st.plotly_chart(assumptions_fig, use_container_width=True)
+
+            st.subheader("Business Fundamentals")
+
+            fundamentals = to_billions(
+                dcf_table[["year", "revenue", "ebit", "fcff"]],
+                ["revenue", "ebit", "fcff"],
+            )
+
+            fundamentals_long = fundamentals.melt(
+                id_vars="year",
+                value_vars=["revenue", "ebit", "fcff"],
+                var_name="Metric",
+                value_name="Amount",
+            )
+
+            fundamentals_fig = px.line(
+                fundamentals_long,
+                x="year",
+                y="Amount",
+                color="Metric",
+                markers=True,
+                title="Revenue, EBIT, and FCFF",
+                labels={"Amount": "Amount ($B)", "year": "Year"},
+            )
+
+            fundamentals_fig.update_layout(height=450)
+
+            st.plotly_chart(fundamentals_fig, use_container_width=True)
+
+            st.subheader("DCF Forecast")
+
+            forecast = results["forecast"].copy()
+            forecast["fcff"] = forecast["fcff"] / 1_000_000_000
+            forecast["present_value"] = forecast["present_value"] / 1_000_000_000
+
+            forecast_long = forecast.melt(
+                id_vars="forecast_year",
+                value_vars=["fcff", "present_value"],
+                var_name="Metric",
+                value_name="Amount",
+            )
+
+            forecast_fig = px.bar(
+                forecast_long,
+                x="forecast_year",
+                y="Amount",
+                color="Metric",
+                barmode="group",
+                title="Forecast FCFF vs Present Value",
+                labels={
+                    "forecast_year": "Forecast Year",
+                    "Amount": "Amount ($B)",
+                },
+            )
+
+            forecast_fig.update_layout(height=450)
+
+            st.plotly_chart(forecast_fig, use_container_width=True)
 
             st.subheader("Automatic WACC Details")
 
@@ -122,7 +264,7 @@ if run_button:
 
             growth_col1.metric("Historical FCFF CAGR", f"{fcff_growth_details['fcff_cagr']:.2%}")
             growth_col2.metric("Revenue CAGR", f"{fcff_growth_details['revenue_cagr']:.2%}")
-            growth_col3.metric("Forecast Growth Used", f"{selected_forecast_growth:.2%}")
+            growth_col3.metric("Terminal Growth", f"{selected_terminal_growth:.2%}")
 
             with st.expander("View assumptions"):
                 st.write(f"Risk-free rate / 10Y Treasury: {wacc_details['risk_free_rate']:.2%}")
@@ -137,11 +279,31 @@ if run_button:
                 st.write(f"Shares outstanding: {shares:,.0f}")
                 st.write(f"Base FCFF: ${results['base_fcff']:,.0f}")
 
-            st.subheader("DCF Historical Table")
-            st.dataframe(dcf_table)
+            with st.expander("View source data used by Abacus"):
+                tab1, tab2, tab3, tab4, tab5 = st.tabs(
+                    [
+                        "Income Statement",
+                        "Balance Sheet",
+                        "Cash Flow",
+                        "DCF Table",
+                        "Forecast",
+                    ]
+                )
 
-            st.subheader("Forecast")
-            st.dataframe(results["forecast"])
+                with tab1:
+                    st.dataframe(income.head())
+
+                with tab2:
+                    st.dataframe(balance.head())
+
+                with tab3:
+                    st.dataframe(cashflow.head())
+
+                with tab4:
+                    st.dataframe(dcf_table.head())
+
+                with tab5:
+                    st.dataframe(results["forecast"].head())
 
         except Exception as error:
             st.error(f"Could not run valuation: {error}")
