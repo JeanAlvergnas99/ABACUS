@@ -88,7 +88,7 @@ try:
 
     # Temporary debug block for analyst estimates
     try:
-        analyst = client.analyst_estimates(ticker)
+        analyst = client.analyst_estimates(ticker, period="annual")
         st.subheader("Analyst Estimates Debug")
         st.write(analyst)
     except Exception as analyst_error:
