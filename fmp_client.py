@@ -30,6 +30,9 @@ class FMPClient:
         if isinstance(data, dict) and data.get("Error Message"):
             raise ValueError(data["Error Message"])
 
+        if isinstance(data, dict) and data.get("error"):
+            raise ValueError(data["error"])
+
         if not data:
             raise ValueError(f"No data returned for endpoint: {endpoint}")
 
@@ -38,28 +41,39 @@ class FMPClient:
     def income_statement(self, ticker, limit=5):
         data = self._get(
             "income-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
+            {
+                "symbol": ticker.upper(),
+                "limit": min(limit, 5),
+            },
         )
         return pd.DataFrame(data)
 
     def balance_sheet(self, ticker, limit=5):
         data = self._get(
             "balance-sheet-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
+            {
+                "symbol": ticker.upper(),
+                "limit": min(limit, 5),
+            },
         )
         return pd.DataFrame(data)
 
     def cash_flow(self, ticker, limit=5):
         data = self._get(
             "cash-flow-statement",
-            {"symbol": ticker.upper(), "limit": min(limit, 5)},
+            {
+                "symbol": ticker.upper(),
+                "limit": min(limit, 5),
+            },
         )
         return pd.DataFrame(data)
 
     def profile(self, ticker):
         data = self._get(
             "profile",
-            {"symbol": ticker.upper()},
+            {
+                "symbol": ticker.upper(),
+            },
         )
         return data[0]
 
@@ -75,10 +89,11 @@ class FMPClient:
             return fallback
 
     def analyst_estimates(self, ticker, period="annual"):
-        return self._get(
+        data = self._get(
             "analyst-estimates",
             {
                 "symbol": ticker.upper(),
                 "period": period,
             },
         )
+        return data
