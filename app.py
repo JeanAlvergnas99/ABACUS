@@ -115,54 +115,38 @@ if run_button:
         upside_downside = (intrinsic_value / current_price) - 1 if current_price else None
 
         if upside_downside is not None:
-            valuation_color = "#16a34a" if upside_downside > 0 else "#dc2626"
-            valuation_text = "UNDERVALUED" if upside_downside > 0 else "OVERVALUED"
+            if upside_downside > 0:
+                st.success(f"UNDERVALUED by {upside_downside:.1%}")
+            else:
+                st.error(f"OVERVALUED by {abs(upside_downside):.1%}")
 
-            st.markdown(
-                f"""
-                <div style="
-                    padding:28px;
-                    border-radius:18px;
-                    background-color:{valuation_color};
-                    color:white;
-                    margin-top:20px;
-                    margin-bottom:28px;
-                ">
-                    <h2 style="margin:0 0 18px 0; font-weight:800;">
-                        {valuation_text}
-                    </h2>
+        value_col1, value_col2, value_col3 = st.columns(3)
 
-                    <div style="
-                        display:flex;
-                        justify-content:space-between;
-                        gap:25px;
-                        text-align:center;
-                        flex-wrap:wrap;
-                    ">
-                        <div style="flex:1; min-width:220px;">
-                            <div style="font-size:20px; opacity:0.9;">Intrinsic Value</div>
-                            <div style="font-size:58px; font-weight:900; line-height:1.1;">
-                                ${intrinsic_value:,.2f}
-                            </div>
-                        </div>
+        value_col1.metric(
+            "Intrinsic Value",
+            f"${intrinsic_value:,.2f}",
+        )
 
-                        <div style="flex:1; min-width:220px;">
-                            <div style="font-size:20px; opacity:0.9;">Current Price</div>
-                            <div style="font-size:58px; font-weight:900; line-height:1.1;">
-                                ${current_price:,.2f}
-                            </div>
-                        </div>
+        if current_price:
+            value_col2.metric(
+                "Current Market Price",
+                f"${current_price:,.2f}",
+            )
+        else:
+            value_col2.metric(
+                "Current Market Price",
+                "N/A",
+            )
 
-                        <div style="flex:1; min-width:220px;">
-                            <div style="font-size:20px; opacity:0.9;">Upside / Downside</div>
-                            <div style="font-size:58px; font-weight:900; line-height:1.1;">
-                                {upside_downside:.1%}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        if upside_downside is not None:
+            value_col3.metric(
+                "Upside / Downside",
+                f"{upside_downside:.1%}",
+            )
+        else:
+            value_col3.metric(
+                "Upside / Downside",
+                "N/A",
             )
 
         col1, col2, col3 = st.columns(3)
