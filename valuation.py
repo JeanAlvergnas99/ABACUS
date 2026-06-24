@@ -14,6 +14,25 @@ def get_market_cap(profile: dict) -> float:
     return safe_number(profile.get("marketCap")) or safe_number(profile.get("mktCap"))
 
 
+def calculate_revenue_cagr(income):
+    income = income.copy()
+    income["date"] = pd.to_datetime(income["date"])
+    income = income.sort_values("date")
+
+    revenues = income["revenue"].dropna()
+    revenue_cagr = 0.025
+
+    if len(revenues) >= 2:
+        first = safe_number(revenues.iloc[0])
+        last = safe_number(revenues.iloc[-1])
+        periods = len(revenues) - 1
+
+        if first > 0 and last > 0:
+            revenue_cagr = (last / first) ** (1 / periods) - 1
+
+    return revenue_cagr
+
+
 def build_dcf_dataframe(income, balance, cashflow):
     income = income.copy()
     balance = balance.copy()
@@ -135,7 +154,6 @@ def calculate_wacc(income, balance, profile, risk_free_rate=0.0425):
     if beta <= 0:
         beta = 1.0
 
-    # Cleaner investment-focused WACC assumptions
     equity_risk_premium = 0.045
 
     size_premium = 0.0
@@ -208,23 +226,10 @@ def calculate_wacc(income, balance, profile, risk_free_rate=0.0425):
     }
 
 
-def calculate_terminal_growth(income, min_growth=0.02, max_growth=0.04):
-    income = income.copy()
-    income["date"] = pd.to_datetime(income["date"])
-    income = income.sort_values("date")
+def calculate_terminal_growth(income, min_growth=0.02, max_growth=0.03):
+    revenue_cagr = calculate_revenue_cagr(income)
 
-    revenues = income["revenue"].dropna()
-    revenue_cagr = 0.025
-
-    if len(revenues) >= 2:
-        first = safe_number(revenues.iloc[0])
-        last = safe_number(revenues.iloc[-1])
-        periods = len(revenues) - 1
-
-        if first > 0 and last > 0:
-            revenue_cagr = (last / first) ** (1 / periods) - 1
-
-    terminal_growth = revenue_cagr * 0.8
+    terminal_growth = revenue_cagr * 0.5
     terminal_growth = max(min_growth, min(max_growth, terminal_growth))
 
     return {
@@ -233,28 +238,29 @@ def calculate_terminal_growth(income, min_growth=0.02, max_growth=0.04):
     }
 
 
-def calculate_fcff_growth(dcf_table):
+def calculate_fcff_growth(dcf_table, income=None):
     fcff_series = dcf_table["fcff"].dropna()
 
     if len(fcff_series) < 2:
-        return {
-            "fcff_cagr": 0.05,
-            "forecast_growth": 0.05,
-        }
-
-    start_fcff = float(fcff_series.iloc[0])
-    end_fcff = float(fcff_series.iloc[-1])
-    periods = len(fcff_series) - 1
-
-    if start_fcff <= 0 or end_fcff <= 0:
         fcff_cagr = 0.05
     else:
-        fcff_cagr = (end_fcff / start_fcff) ** (1 / periods) - 1
+        start_fcff = float(fcff_series.iloc[0])
+        end_fcff = float(fcff_series.iloc[-1])
+        periods = len(fcff_series) - 1
 
-    forecast_growth = max(0.00, min(0.10, fcff_cagr))
+        if start_fcff <= 0 or end_fcff <= 0:
+            fcff_cagr = 0.05
+        else:
+            fcff_cagr = (end_fcff / start_fcff) ** (1 / periods) - 1
+
+    revenue_cagr = calculate_revenue_cagr(income) if income is not None else fcff_cagr
+
+    forecast_growth = min(fcff_cagr, revenue_cagr)
+    forecast_growth = max(0.00, min(0.08, forecast_growth))
 
     return {
         "fcff_cagr": fcff_cagr,
+        "revenue_cagr": revenue_cagr,
         "forecast_growth": forecast_growth,
     }
 
