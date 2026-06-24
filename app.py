@@ -86,6 +86,14 @@ try:
     cashflow = client.cash_flow(ticker, limit=5)
     profile = client.profile(ticker)
 
+    # Temporary debug block for analyst estimates
+    try:
+        analyst = client.analyst_estimates(ticker)
+        st.subheader("Analyst Estimates Debug")
+        st.write(analyst)
+    except Exception as analyst_error:
+        st.warning(f"Could not fetch analyst estimates: {analyst_error}")
+
     risk_free_rate = client.risk_free_rate_10y()
 
     dcf_table = build_dcf_dataframe(income, balance, cashflow)
