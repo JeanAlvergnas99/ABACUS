@@ -268,6 +268,7 @@ try:
 
     if valuation_method == "Analyst DCF" and analyst_forecast is not None:
         st.subheader("Analyst Operating Forecast")
+        st.write(analyst_forecast)
 
         analyst_display = analyst_forecast.copy()
 
