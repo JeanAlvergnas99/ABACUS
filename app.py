@@ -52,11 +52,19 @@ if run_button:
             cashflow = client.cash_flow(ticker, limit=5)
             profile = client.profile(ticker)
 
+            risk_free_rate = client.risk_free_rate_10y()
+
             dcf_table = build_dcf_dataframe(income, balance, cashflow)
 
             net_debt, shares = get_net_debt_and_shares(balance, profile, income)
 
-            wacc_details = calculate_wacc(income, balance, profile)
+            wacc_details = calculate_wacc(
+                income=income,
+                balance=balance,
+                profile=profile,
+                risk_free_rate=risk_free_rate,
+            )
+
             terminal_growth_details = calculate_terminal_growth(income)
             fcff_growth_details = calculate_fcff_growth(dcf_table)
 
@@ -117,8 +125,11 @@ if run_button:
             growth_col3.metric("Revenue CAGR", f"{terminal_growth_details['revenue_cagr']:.2%}")
 
             with st.expander("View assumptions"):
-                st.write(f"Risk-free rate: {wacc_details['risk_free_rate']:.2%}")
+                st.write(f"Risk-free rate / 10Y Treasury: {wacc_details['risk_free_rate']:.2%}")
                 st.write(f"Equity risk premium: {wacc_details['equity_risk_premium']:.2%}")
+                st.write(f"Size premium: {wacc_details['size_premium']:.2%}")
+                st.write(f"Interest coverage: {wacc_details['interest_coverage']:.2f}x")
+                st.write(f"Credit spread: {wacc_details['credit_spread']:.2%}")
                 st.write(f"Tax rate: {wacc_details['tax_rate']:.2%}")
                 st.write(f"Market cap: ${wacc_details['market_cap']:,.0f}")
                 st.write(f"Total debt: ${wacc_details['total_debt']:,.0f}")
