@@ -278,12 +278,19 @@ def run_dcf(historical_fcff, net_debt, shares_outstanding, wacc, forecast_growth
         raise ValueError("FCFF is unavailable.")
 
     base_fcff = float(clean_fcff.iloc[-1])
+    fcff_warning = None
 
     if base_fcff <= 0:
-        base_fcff = float(clean_fcff.mean())
+        positive_fcff = clean_fcff[clean_fcff > 0]
 
-    if base_fcff <= 0:
-        raise ValueError("FCFF is negative or unavailable.")
+        if not positive_fcff.empty:
+            base_fcff = float(positive_fcff.mean())
+            fcff_warning = (
+                "Latest FCFF is negative. Abacus used the average of positive historical FCFF periods. "
+                "This valuation may be less reliable."
+            )
+        else:
+            raise ValueError("FCFF is negative or unavailable.")
 
     forecast = []
 
@@ -311,6 +318,7 @@ def run_dcf(historical_fcff, net_debt, shares_outstanding, wacc, forecast_growth
 
     return {
         "base_fcff": base_fcff,
+        "fcff_warning": fcff_warning,
         "forecast": forecast_df,
         "terminal_value": terminal_value,
         "pv_terminal_value": pv_terminal_value,
