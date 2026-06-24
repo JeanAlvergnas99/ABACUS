@@ -41,10 +41,8 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
         income_before_tax = safe_number(inc.get("incomeBeforeTax"))
         income_tax = safe_number(inc.get("incomeTaxExpense"))
 
-        if income_before_tax > 0:
-            tax_rate = max(0.0, min(0.35, income_tax / income_before_tax))
-        else:
-            tax_rate = 0.21
+        tax_rate = income_tax / income_before_tax if income_before_tax > 0 else 0.21
+        tax_rate = max(0.0, min(0.35, tax_rate))
 
         depreciation = safe_number(cf.get("depreciationAndAmortization"))
         capex = abs(safe_number(cf.get("capitalExpenditure")))
@@ -55,7 +53,6 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
         short_term_debt = safe_number(bs.get("shortTermDebt"))
 
         nwc = (current_assets - cash) - (current_liabilities - short_term_debt)
-
         change_nwc = 0.0 if previous_nwc is None else nwc - previous_nwc
         previous_nwc = nwc
 
@@ -145,7 +142,7 @@ def run_dcf(
     }
 
 
-def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict) -> tuple[float, float]:
+def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict, income: pd.DataFrame | None = None) -> tuple[float, float]:
     latest_bs = balance.copy()
 
     if "date" not in latest_bs.columns:
@@ -158,18 +155,37 @@ def get_net_debt_and_shares(balance: pd.DataFrame, profile: dict) -> tuple[float
     cash = safe_number(latest_bs.get("cashAndCashEquivalents"))
     net_debt = total_debt - cash
 
+    shares = 0.0
+
+    for key in [
+        "sharesOutstanding",
+        "weightedAverageShsOut",
+        "weightedAverageShsOutDil",
+    ]:
+        shares = safe_number(profile.get(key))
+        if shares > 0:
+            return net_debt, shares
+
+    if income is not None and not income.empty:
+        latest_income = income.copy()
+        latest_income["date"] = pd.to_datetime(latest_income["date"])
+        latest_income = latest_income.sort_values("date").iloc[-1]
+
+        for key in [
+            "weightedAverageShsOut",
+            "weightedAverageShsOutDil",
+        ]:
+            shares = safe_number(latest_income.get(key))
+            if shares > 0:
+                return net_debt, shares
+
     price = safe_number(profile.get("price"))
     market_cap = safe_number(profile.get("mktCap"))
 
-    shares = safe_number(profile.get("sharesOutstanding"))
-
-    if shares <= 0:
-        shares = safe_number(profile.get("weightedAverageShsOut"))
-
-    if shares <= 0 and market_cap > 0 and price > 0:
+    if market_cap > 0 and price > 0:
         shares = market_cap / price
 
     if shares <= 0:
-        raise ValueError("Shares outstanding could not be found from FMP profile data.")
+        raise ValueError("Shares outstanding could not be found from FMP profile or income statement data.")
 
     return net_debt, shares
