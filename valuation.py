@@ -14,14 +14,12 @@ def get_market_cap(profile: dict) -> float:
     return safe_number(profile.get("marketCap")) or safe_number(profile.get("mktCap"))
 
 
-def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: pd.DataFrame) -> pd.DataFrame:
+def build_dcf_dataframe(income, balance, cashflow):
     income = income.copy()
     balance = balance.copy()
     cashflow = cashflow.copy()
 
     for df in [income, balance, cashflow]:
-        if "date" not in df.columns:
-            raise ValueError("Financial statements are missing the date column.")
         df["date"] = pd.to_datetime(df["date"])
         df.sort_values("date", inplace=True)
 
@@ -30,7 +28,6 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
 
     for _, inc in income.iterrows():
         year = inc["date"].year
-
         bs_match = balance[balance["date"].dt.year == year]
         cf_match = cashflow[cashflow["date"].dt.year == year]
 
@@ -83,16 +80,8 @@ def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: p
     return dcf
 
 
-def get_net_debt_and_shares(
-    balance: pd.DataFrame,
-    profile: dict,
-    income: pd.DataFrame | None = None,
-) -> tuple[float, float]:
+def get_net_debt_and_shares(balance, profile, income=None):
     latest_bs = balance.copy()
-
-    if "date" not in latest_bs.columns:
-        raise ValueError("Balance sheet is missing the date column.")
-
     latest_bs["date"] = pd.to_datetime(latest_bs["date"])
     latest_bs = latest_bs.sort_values("date").iloc[-1]
 
@@ -124,19 +113,12 @@ def get_net_debt_and_shares(
         shares = market_cap / price
 
     if shares <= 0:
-        raise ValueError("Shares outstanding could not be found from FMP profile or income statement data.")
+        raise ValueError("Shares outstanding could not be found.")
 
     return net_debt, shares
 
 
-def calculate_wacc(
-    income: pd.DataFrame,
-    balance: pd.DataFrame,
-    profile: dict,
-    risk_free_rate: float = 0.0425,
-    equity_risk_premium: float = 0.05,
-    default_beta: float = 1.0,
-) -> dict:
+def calculate_wacc(income, balance, profile):
     latest_income = income.copy()
     latest_balance = balance.copy()
 
@@ -146,9 +128,12 @@ def calculate_wacc(
     latest_income = latest_income.sort_values("date").iloc[-1]
     latest_balance = latest_balance.sort_values("date").iloc[-1]
 
-    beta = safe_number(profile.get("beta"), default_beta)
+    risk_free_rate = 0.0425
+    equity_risk_premium = 0.05
+
+    beta = safe_number(profile.get("beta"), 1.0)
     if beta <= 0:
-        beta = default_beta
+        beta = 1.0
 
     market_cap = get_market_cap(profile)
     total_debt = safe_number(latest_balance.get("totalDebt"))
@@ -179,7 +164,7 @@ def calculate_wacc(
         equity_weight = 1.0
         debt_weight = 0.0
 
-    wacc = (equity_weight * cost_of_equity) + (debt_weight * after_tax_cost_of_debt)
+    wacc = equity_weight * cost_of_equity + debt_weight * after_tax_cost_of_debt
     wacc = max(0.05, min(0.20, wacc))
 
     return {
@@ -198,55 +183,58 @@ def calculate_wacc(
     }
 
 
-def calculate_terminal_growth(
-    income: pd.DataFrame,
-    min_growth: float = 0.02,
-    max_growth: float = 0.04,
-) -> dict:
+def calculate_terminal_growth(income, min_growth=0.02, max_growth=0.04):
     income = income.copy()
-
-    if "date" not in income.columns:
-        raise ValueError("Income statement is missing the date column.")
-
-    if "revenue" not in income.columns:
-        raise ValueError("Income statement is missing the revenue column.")
-
     income["date"] = pd.to_datetime(income["date"])
     income = income.sort_values("date")
 
     revenues = income["revenue"].dropna()
-
     revenue_cagr = 0.025
 
     if len(revenues) >= 2:
-        first_revenue = safe_number(revenues.iloc[0])
-        last_revenue = safe_number(revenues.iloc[-1])
+        first = safe_number(revenues.iloc[0])
+        last = safe_number(revenues.iloc[-1])
         periods = len(revenues) - 1
 
-        if first_revenue > 0 and last_revenue > 0 and periods > 0:
-            revenue_cagr = (last_revenue / first_revenue) ** (1 / periods) - 1
+        if first > 0 and last > 0:
+            revenue_cagr = (last / first) ** (1 / periods) - 1
 
     terminal_growth = revenue_cagr * 0.5
-    terminal_growth = max(min_growth, terminal_growth)
-    terminal_growth = min(max_growth, terminal_growth)
+    terminal_growth = max(min_growth, min(max_growth, terminal_growth))
 
     return {
         "terminal_growth": terminal_growth,
         "revenue_cagr": revenue_cagr,
-        "min_growth": min_growth,
-        "max_growth": max_growth,
     }
 
 
-def run_dcf(
-    historical_fcff: pd.Series,
-    net_debt: float,
-    shares_outstanding: float,
-    wacc: float = 0.10,
-    forecast_growth: float = 0.05,
-    terminal_growth: float = 0.025,
-    years: int = 5,
-) -> dict:
+def calculate_fcff_growth(dcf_table):
+    fcff_series = dcf_table["fcff"].dropna()
+
+    if len(fcff_series) < 2:
+        return {
+            "fcff_cagr": 0.05,
+            "forecast_growth": 0.05,
+        }
+
+    start_fcff = float(fcff_series.iloc[0])
+    end_fcff = float(fcff_series.iloc[-1])
+    periods = len(fcff_series) - 1
+
+    if start_fcff <= 0 or end_fcff <= 0:
+        fcff_cagr = 0.05
+    else:
+        fcff_cagr = (end_fcff / start_fcff) ** (1 / periods) - 1
+
+    forecast_growth = max(0.00, min(0.15, fcff_cagr))
+
+    return {
+        "fcff_cagr": fcff_cagr,
+        "forecast_growth": forecast_growth,
+    }
+
+
+def run_dcf(historical_fcff, net_debt, shares_outstanding, wacc, forecast_growth, terminal_growth, years):
     if shares_outstanding <= 0:
         raise ValueError("Shares outstanding must be greater than zero.")
 
@@ -264,7 +252,7 @@ def run_dcf(
         base_fcff = float(clean_fcff.mean())
 
     if base_fcff <= 0:
-        raise ValueError("FCFF is negative or unavailable. This simple DCF needs positive FCFF.")
+        raise ValueError("FCFF is negative or unavailable.")
 
     forecast = []
 
