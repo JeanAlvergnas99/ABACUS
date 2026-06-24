@@ -10,6 +10,10 @@ def safe_number(value, default: float = 0.0) -> float:
         return default
 
 
+def get_market_cap(profile: dict) -> float:
+    return safe_number(profile.get("marketCap")) or safe_number(profile.get("mktCap"))
+
+
 def build_dcf_dataframe(income: pd.DataFrame, balance: pd.DataFrame, cashflow: pd.DataFrame) -> pd.DataFrame:
     income = income.copy()
     balance = balance.copy()
@@ -114,7 +118,7 @@ def get_net_debt_and_shares(
                 return net_debt, shares
 
     price = safe_number(profile.get("price"))
-    market_cap = safe_number(profile.get("mktCap"))
+    market_cap = get_market_cap(profile)
 
     if market_cap > 0 and price > 0:
         shares = market_cap / price
@@ -146,7 +150,7 @@ def calculate_wacc(
     if beta <= 0:
         beta = default_beta
 
-    market_cap = safe_number(profile.get("mktCap"))
+    market_cap = get_market_cap(profile)
     total_debt = safe_number(latest_balance.get("totalDebt"))
 
     interest_expense = abs(safe_number(latest_income.get("interestExpense")))
